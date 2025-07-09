@@ -1,66 +1,96 @@
 
 package modelo.facade;
 
+// import org.springframework.beans.factory.annotation.Autowired;
+// import org.springframework.stereotype.Service;
+// import org.springframework.transaction.annotation.Transactional;
+
 import modelo.usuario.Usuario;
 import modelo.evento.Evento;
 import modelo.entrada.TipoEntrada;
-import modelo.entrada.Entrada;
-import modelo.entrada.EntradaBase;
+import modelo.entrada.Entrada; // Asumiendo que Entrada no es una entidad JPA independiente, sino parte de Compra
+import modelo.entrada.EntradaBase; // Idem
 import modelo.compra.Compra;
-import modelo.compra.MetodoPago;
+import modelo.compra.MetodoPago; // MetodoPago podría ser @Embeddable o una entidad simple
 import modelo.compra.EstadoCompra;
 import modelo.validacion.ValidacionHandler;
 import modelo.validacion.ValidacionContext;
-// import modelo.notificacion.SistemaNotificaciones; // Ya no es necesario directamente
 import modelo.mediador.MediadorCompras;
 import modelo.excepciones.ValidacionException;
 import modelo.excepciones.OperacionInvalidaException;
+import modelo.excepciones.EntidadNoEncontradaException;
+
+import modelo.repositorio.CompraRepository;
+import modelo.repositorio.EventoRepository;
+import modelo.repositorio.UsuarioRepository;
+import modelo.repositorio.TipoEntradaRepository;
+
 
 import java.util.List;
 import java.util.ArrayList;
 
-public class ProcesoCompraFacade {
-    private final ProcesadorPago procesadorPago;
-    private final GeneradorEntradas generadorEntradas;
+// @Service
+public class ProcesoCompraFacade { // Podría renombrarse a CompraService
+    private final ProcesadorPago procesadorPago; // Simulado, no interactúa con BD
+    private final GeneradorEntradas generadorEntradas; // Simulado, no interactúa con BD
     private final ValidacionHandler cadenaValidacionGlobal;
     private final MediadorCompras mediador;
 
+    private final CompraRepository compraRepository;
+    private final EventoRepository eventoRepository;
+    private final UsuarioRepository usuarioRepository;
+    private final TipoEntradaRepository tipoEntradaRepository;
+
+
+    // @Autowired
     public ProcesoCompraFacade(ProcesadorPago procesadorPago,
                                GeneradorEntradas generadorEntradas,
                                ValidacionHandler cadenaValidacionGlobal,
-                               MediadorCompras mediador) {
-        if (procesadorPago == null) throw new IllegalArgumentException("ProcesadorPago no puede ser nulo.");
-        if (generadorEntradas == null) throw new IllegalArgumentException("GeneradorEntradas no puede ser nulo.");
-        if (cadenaValidacionGlobal == null) throw new IllegalArgumentException("CadenaValidacionGlobal no puede ser nula.");
-        if (mediador == null) throw new IllegalArgumentException("MediadorCompras no puede ser nulo.");
-
+                               MediadorCompras mediador,
+                               CompraRepository compraRepository,
+                               EventoRepository eventoRepository,
+                               UsuarioRepository usuarioRepository,
+                               TipoEntradaRepository tipoEntradaRepository) {
+        // Validaciones de argumentos nulos...
         this.procesadorPago = procesadorPago;
         this.generadorEntradas = generadorEntradas;
         this.cadenaValidacionGlobal = cadenaValidacionGlobal;
         this.mediador = mediador;
+        this.compraRepository = compraRepository;
+        this.eventoRepository = eventoRepository;
+        this.usuarioRepository = usuarioRepository;
+        this.tipoEntradaRepository = tipoEntradaRepository;
     }
 
-    public Compra ejecutarProcesoCompra(Usuario usuario, Evento evento, TipoEntrada tipoEntrada, int cantidad, MetodoPago metodoPago, String codigoDescuento) {
+    // @Transactional
+    public Compra ejecutarProcesoCompra(Long usuarioId, Long eventoId, Long tipoEntradaId, int cantidad, MetodoPago metodoPago, String codigoDescuento) {
 
-        // Validaciones previas de argumentos
-        if (usuario == null) throw new ValidacionException("Usuario no puede ser nulo para la compra.");
-        if (evento == null) throw new ValidacionException("Evento no puede ser nulo para la compra.");
-        if (tipoEntrada == null) throw new ValidacionException("TipoEntrada no puede ser nulo para la compra.");
+        if (usuarioId == null) throw new ValidacionException("ID de Usuario no puede ser nulo para la compra.");
+        if (eventoId == null) throw new ValidacionException("ID de Evento no puede ser nulo para la compra.");
+        if (tipoEntradaId == null) throw new ValidacionException("ID de TipoEntrada no puede ser nulo para la compra.");
         if (cantidad <= 0) throw new ValidacionException("La cantidad de entradas debe ser mayor a cero.");
         if (metodoPago == null) throw new ValidacionException("Método de pago no puede ser nulo.");
+
+        Usuario usuario = usuarioRepository.findById(usuarioId)
+            .orElseThrow(() -> new EntidadNoEncontradaException("Usuario con ID " + usuarioId + " no encontrado."));
+        Evento evento = eventoRepository.findById(eventoId)
+            .orElseThrow(() -> new EntidadNoEncontradaException("Evento con ID " + eventoId + " no encontrado."));
+        TipoEntrada tipoEntrada = tipoEntradaRepository.findById(tipoEntradaId)
+            .orElseThrow(() -> new EntidadNoEncontradaException("Tipo de Entrada con ID " + tipoEntradaId + " no encontrado."));
 
 
         ValidacionContext contextoValidacion = new ValidacionContext(usuario, evento, tipoEntrada, cantidad);
         if (!cadenaValidacionGlobal.procesarValidacion(contextoValidacion)) {
-            // La cadena de validación debería idealmente lanzar una excepción específica si falla,
-            // o getMensajeError() debería ser más estructurado.
-            // Por ahora, lanzamos una ValidacionException genérica con el mensaje del handler.
             throw new ValidacionException("Error de validación en la compra: " + cadenaValidacionGlobal.getMensajeError());
         }
 
+        // La creación de objetos Entrada (EntradaBase) puede simplificarse si no son entidades persistentes independientes.
+        // Si Compra tiene una colección de Strings o IDs de entradas generadas, sería diferente.
+        // Asumiendo que la entidad Compra maneja la lista de Entrada internamente y no son entidades separadas.
         List<Entrada> entradasParaComprar = new ArrayList<>();
         double precioUnitario = tipoEntrada.getPrecio();
         for (int i = 0; i < cantidad; i++) {
+            // Si EntradaBase no es una entidad, esto es solo para la lógica de la compra.
             entradasParaComprar.add(new EntradaBase(tipoEntrada, evento));
         }
         double totalCalculado = precioUnitario * cantidad;
@@ -70,32 +100,39 @@ public class ProcesoCompraFacade {
         }
 
         Compra nuevaCompra = new Compra(usuario, evento, tipoEntrada, cantidad, entradasParaComprar, totalCalculado, metodoPago);
-        // System.out.println("ProcesoCompraFacade: Compra iniciada ID: " + nuevaCompra.getId() + " por " + totalCalculado);
+        // El ID de nuevaCompra será generado por la BD al guardar.
 
         if (!procesadorPago.procesar(metodoPago, nuevaCompra.getTotalPagado())) {
             nuevaCompra.setEstado(EstadoCompra.CANCELADA);
-            // mediador.notificarFalloPago(usuario, nuevaCompra); // Considerar si el mediador debe ser notificado aquí.
-            throw new OperacionInvalidaException("Error en el procesamiento del pago para la compra ID: " + nuevaCompra.getId());
+            // No guardamos la compra si el pago falla, o la guardamos como CANCELADA si es necesario registrar el intento.
+            // compraRepository.save(nuevaCompra); // Opcional
+            throw new OperacionInvalidaException("Error en el procesamiento del pago para la compra.");
         }
         nuevaCompra.setEstado(EstadoCompra.CONFIRMADA);
-        // System.out.println("ProcesoCompraFacade: Pago procesado y compra confirmada ID: " + nuevaCompra.getId());
 
-        // Este es un punto crítico. Si falla, el pago se hizo pero no se asignaron entradas.
-        // Requiere una lógica de compensación (ej. rollback del pago, o marcar la compra para revisión manual).
+        // Persistir la compra primero para obtener su ID y asegurar que la transacción principal está en curso
+        Compra compraGuardada = compraRepository.save(nuevaCompra);
+
+
         if (!tipoEntrada.reducirDisponibilidad(cantidad)) {
-            nuevaCompra.setEstado(EstadoCompra.ERROR_DISPONIBILIDAD_POST_PAGO); // Un nuevo estado podría ser útil
-            // Lógica de compensación:
-            // procesadorPago.revertirPago(nuevaCompra.getIdTransaccionPago(), nuevaCompra.getTotalPagado()); // Asumiendo que Compra tiene ID de trans.
-            // mediador.notificarErrorCriticoCompra(nuevaCompra, "Fallo al reducir disponibilidad post-pago");
-            throw new OperacionInvalidaException("Error CRÍTICO: No se pudo reducir la disponibilidad de entradas después del pago para compra ID: " + nuevaCompra.getId() + ". Se requiere intervención manual o reversión del pago.");
+            // Este es un punto crítico. El pago se hizo, pero no se pueden asignar entradas.
+            // Se debe revertir la transacción o marcar para intervención.
+            // JPA con @Transactional debería hacer rollback si lanzamos una excepción aquí.
+            compraGuardada.setEstado(EstadoCompra.ERROR_DISPONIBILIDAD_POST_PAGO);
+            compraRepository.save(compraGuardada); // Guardar el estado de error
+            throw new OperacionInvalidaException("Error CRÍTICO: No se pudo reducir la disponibilidad de entradas después del pago para compra ID: " + compraGuardada.getId() + ". Se requiere intervención manual o reversión del pago.");
         }
-        generadorEntradas.generar(evento, tipoEntrada, cantidad, nuevaCompra);
-        // System.out.println("ProcesoCompraFacade: Entradas generadas para compra ID: " + nuevaCompra.getId());
+        tipoEntradaRepository.save(tipoEntrada); // Guardar el cambio en la disponibilidad del TipoEntrada
 
-        mediador.notificarCompraExitosa(usuario, nuevaCompra);
-        nuevaCompra.generarComprobante();
+        evento.registrarVentaEntradas(cantidad); // Actualizar contador en Evento
+        eventoRepository.save(evento); // Guardar el cambio en Evento
 
-        return nuevaCompra;
+        generadorEntradas.generar(evento, tipoEntrada, cantidad, compraGuardada); // Simulado
+
+        mediador.notificarCompraExitosa(usuario, compraGuardada);
+        compraGuardada.generarComprobante(); // Simulado
+
+        return compraGuardada;
     }
 
     private double aplicarDescuento(double totalActual, String codigo) {
