@@ -23,7 +23,7 @@ public class EventoBuilder {
     private int capacidad;
     private Organizador organizador;
     private List<Imagen> imagenes = new ArrayList<>();
-    private List<String> videosPromocionales = new ArrayList<>();
+    private List<Video> videosPromocionales = new ArrayList<>(); // Cambiado a List<Video>
     private List<TipoEntrada> tiposEntrada = new ArrayList<>();
     private EstadoEventos estadoActual;
 
@@ -79,13 +79,19 @@ public class EventoBuilder {
         return this;
     }
 
-    public EventoBuilder addVideoPromocional(String videoUrl) {
-        this.videosPromocionales.add(videoUrl);
+    public EventoBuilder addVideoPromocional(Video video) { // Cambiado a objeto Video
+        if (video != null) {
+            this.videosPromocionales.add(video);
+        }
         return this;
     }
 
-    public EventoBuilder withVideosPromocionales(List<String> videosPromocionales) {
-        this.videosPromocionales = videosPromocionales;
+    public EventoBuilder withVideosPromocionales(List<Video> videosPromocionales) { // Cambiado a List<Video>
+        if (videosPromocionales != null) {
+            this.videosPromocionales = videosPromocionales;
+        } else {
+            this.videosPromocionales = new ArrayList<>(); // Evitar null pointer si se pasa null
+        }
         return this;
     }
 
