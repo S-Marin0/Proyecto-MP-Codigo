@@ -21,23 +21,34 @@ public class Evento {
     private int capacidad;
     private Organizador organizador;
     private List<Imagen> imagenes;
-    private List<Video> videosPromocionales; // Cambiado de List<String>
+    private List<Video> videosPromocionales;
     private List<TipoEntrada> tiposEntrada;
-    // private double precio; // El precio suele estar asociado al TipoEntrada, no directamente al evento general
     private int entradasVendidas;
-    private EstadoEventos estadoActual;
+
+    // Para persistencia JPA del estado
+    // @Column(name = "estado_evento") // Esta anotación irá en la entidad JPA real
+    private String estadoActualNombre;
+
+    // @Transient // Esta anotación irá en la entidad JPA real
+    private EstadoEventos estadoActualObj;
+
 
     // Constructor package-private para ser usado por EventoBuilder
+    // El ID String se elimina, se usará Long generado por BD en la entidad JPA.
+    // El estado inicial se establecerá explícitamente.
     Evento() {
         this.imagenes = new ArrayList<>();
         this.videosPromocionales = new ArrayList<>();
         this.tiposEntrada = new ArrayList<>();
         this.entradasVendidas = 0;
-        this.estadoActual = new EstadoEventoBorrador(); // Estado inicial por defecto
+        // El estadoActualObj se inicializará a Borrador por defecto,
+        // y estadoActualNombre se sincronizará.
+        setEstadoActualObj(new EstadoEventoBorrador());
     }
 
     // Getters
-    public String getId() { return id; }
+    // public String getId() { return id; } // Se cambiará a Long id en la entidad JPA
+    public Long getId() { return null; } // Placeholder, el ID real será Long en la entidad JPA
     public String getNombre() { return nombre; }
     public String getDescripcion() { return descripcion; }
     public String getCategoria() { return categoria; }
@@ -46,17 +57,24 @@ public class Evento {
     public Lugar getLugar() { return lugar; }
     public int getCapacidad() { return capacidad; }
     public Organizador getOrganizador() { return organizador; }
-    public List<Imagen> getImagenes() { return new ArrayList<>(imagenes); } // Devolver copia
-    public List<Video> getVideosPromocionales() { return new ArrayList<>(videosPromocionales); } // Devolver copia
-    public List<TipoEntrada> getTiposEntrada() { return new ArrayList<>(tiposEntrada); } // Devolver copia
+    public List<Imagen> getImagenes() { return new ArrayList<>(imagenes); }
+    public List<Video> getVideosPromocionales() { return new ArrayList<>(videosPromocionales); }
+    public List<TipoEntrada> getTiposEntrada() { return new ArrayList<>(tiposEntrada); }
     public int getEntradasVendidas() { return entradasVendidas; }
-    public EstadoEventos getEstadoActual() { return estadoActual; }
+
+    public EstadoEventos getEstadoActualObj() { // Getter para el objeto estado
+        if (this.estadoActualObj == null && this.estadoActualNombre != null) {
+            reconstruirEstadoDesdeNombre(); // Intentar reconstruir si es nulo pero hay nombre
+        }
+        return estadoActualObj;
+    }
+    public String getEstadoActualNombre() { return estadoActualNombre; } // Getter para el nombre del estado
 
     // Setters (package-private, para ser usados principalmente por el Builder)
-    void setId(String id) { this.id = id; }
+    // void setId(String id) { this.id = id; } // El ID será Long y manejado por JPA
+    public void setId(Long id) { /* this.id = id; */ } // Placeholder para el ID Long de JPA
+
     // setNombre, setDescripcion, etc. ahora son públicos para edición
-    // void setNombre(String nombre) { this.nombre = nombre; }
-    // void setDescripcion(String descripcion) { this.descripcion = descripcion; }
     // void setCategoria(String categoria) { this.categoria = categoria; }
     // void setFecha(Date fecha) { this.fecha = fecha; }
     // void setHora(String hora) { this.hora = hora; }
@@ -106,59 +124,123 @@ public class Evento {
         }
     }
 
-
-    public void setEstado(EstadoEventos nuevoEstado) {
-        this.estadoActual = nuevoEstado;
-        // System.out.println("Evento " + nombre + " ha cambiado al estado: " + nuevoEstado.getClass().getSimpleName());
+    // Setter para el objeto de estado, actualiza también el nombre del estado
+    public void setEstadoActualObj(EstadoEventos nuevoEstado) {
+        this.estadoActualObj = nuevoEstado;
+        if (nuevoEstado != null) {
+            this.estadoActualNombre = nuevoEstado.getClass().getSimpleName();
+        } else {
+            this.estadoActualNombre = null;
+        }
     }
+
+    // Usado internamente por el Builder o JPA (si se configura)
+    public void setEstadoActualNombre(String nombreEstado) {
+        this.estadoActualNombre = nombreEstado;
+        // Podría llamar a reconstruirEstadoDesdeNombre() aquí, pero es mejor hacerlo
+        // explícitamente o con @PostLoad para evitar problemas de ciclo de vida.
+    }
+
+    // @PostLoad // Anotación JPA para ejecutar después de cargar la entidad
+    public void reconstruirEstadoDesdeNombre() {
+        if (this.estadoActualNombre == null) {
+            // Si no hay nombre de estado, podría ser un nuevo evento o un error.
+            // Establecer un estado por defecto o lanzar excepción.
+            this.estadoActualObj = new EstadoEventoBorrador(); // Por defecto
+            this.estadoActualNombre = this.estadoActualObj.getClass().getSimpleName();
+            return;
+        }
+        switch (this.estadoActualNombre) {
+            case "EstadoEventoBorrador":
+                this.estadoActualObj = new modelo.state.EstadoEventoBorrador();
+                break;
+            case "EstadoEventoPublicado":
+                this.estadoActualObj = new modelo.state.EstadoEventoPublicado();
+                break;
+            case "EstadoEventoEnCurso":
+                this.estadoActualObj = new modelo.state.EstadoEventoEnCurso();
+                break;
+            case "EstadoEventoFinalizado":
+                this.estadoActualObj = new modelo.state.EstadoEventoFinalizado();
+                break;
+            case "EstadoEventoCancelado":
+                this.estadoActualObj = new modelo.state.EstadoEventoCancelado();
+                break;
+            default:
+                // Podría lanzar una excepción si el nombre del estado no es reconocido
+                // o asignar un estado por defecto.
+                System.err.println("Advertencia: Nombre de estado desconocido '" + this.estadoActualNombre + "'. Se usará Borrador por defecto.");
+                this.estadoActualObj = new EstadoEventoBorrador();
+                this.estadoActualNombre = this.estadoActualObj.getClass().getSimpleName();
+        }
+    }
+
 
     // Métodos para el patrón State (delegados al objeto de estado actual)
-    // Estos deberían lanzar excepciones si el estado no está inicializado, en lugar de System.err
     public void publicar() {
-        if (estadoActual == null) throw new IllegalStateException("Estado actual no inicializado para el evento: " + nombre);
-        estadoActual.publicar(this);
+        if (getEstadoActualObj() == null) throw new IllegalStateException("Estado actual no inicializado para el evento: " + nombre);
+        getEstadoActualObj().publicar(this);
     }
     public void cancelar() {
-        if (estadoActual == null) throw new IllegalStateException("Estado actual no inicializado para el evento: " + nombre);
-        estadoActual.cancelar(this);
+        if (getEstadoActualObj() == null) throw new IllegalStateException("Estado actual no inicializado para el evento: " + nombre);
+        getEstadoActualObj().cancelar(this);
     }
     public void iniciarEvento() {
-        if (estadoActual == null) throw new IllegalStateException("Estado actual no inicializado para el evento: " + nombre);
-        estadoActual.iniciar(this);
+        if (getEstadoActualObj() == null) throw new IllegalStateException("Estado actual no inicializado para el evento: " + nombre);
+        getEstadoActualObj().iniciar(this);
     }
     public void finalizarEvento() {
-        if (estadoActual == null) throw new IllegalStateException("Estado actual no inicializado para el evento: " + nombre);
-        estadoActual.finalizar(this);
+        if (getEstadoActualObj() == null) throw new IllegalStateException("Estado actual no inicializado para el evento: " + nombre);
+        getEstadoActualObj().finalizar(this);
     }
 
     // Métodos de negocio adicionales
     public void agregarImagen(Imagen imagen) {
-        if (this.imagenes == null) {
-            this.imagenes = new ArrayList<>();
-        }
+        if (imagen == null) return;
+        if (this.imagenes == null) this.imagenes = new ArrayList<>();
         this.imagenes.add(imagen);
+        imagen.setEvento(this); // Mantener relación bidireccional
     }
 
-    public void agregarVideoPromocional(Video video) { // Cambiado a objeto Video
-        if (video == null) return; // No añadir nulos
-        if (this.videosPromocionales == null) { // Asegurar inicialización
+    public void eliminarImagen(Imagen imagen) {
+        if (imagen != null && this.imagenes != null) {
+            this.imagenes.remove(imagen);
+            // imagen.setEvento(null); // Opcional, depende de si se quiere romper la relación
+        }
+    }
+
+    public void agregarVideoPromocional(Video video) {
+        if (video == null) return;
+        if (this.videosPromocionales == null) {
             this.videosPromocionales = new ArrayList<>();
         }
         this.videosPromocionales.add(video);
+        video.setEvento(this); // Mantener relación bidireccional
     }
 
     public void eliminarVideoPromocional(Video video) {
         if (video != null && this.videosPromocionales != null) {
             this.videosPromocionales.remove(video);
+            // video.setEvento(null);
         }
     }
 
     public void agregarTipoEntrada(TipoEntrada tipoEntrada) {
+        if (tipoEntrada == null) return;
         if (this.tiposEntrada == null) {
             this.tiposEntrada = new ArrayList<>();
         }
         this.tiposEntrada.add(tipoEntrada);
+        tipoEntrada.setEvento(this); // Mantener relación bidireccional
     }
+
+    public void eliminarTipoEntrada(TipoEntrada tipoEntrada) {
+        if (tipoEntrada != null && this.tiposEntrada != null) {
+            this.tiposEntrada.remove(tipoEntrada);
+            // tipoEntrada.setEvento(null);
+        }
+    }
+
 
     public boolean hayDisponibilidad(int cantidad) {
         return (capacidad - entradasVendidas) >= cantidad;

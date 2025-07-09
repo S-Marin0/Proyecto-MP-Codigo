@@ -24,7 +24,9 @@ import modelo.reembolso.ProcesadorReembolso;
 import modelo.usuario.Asistente;
 import modelo.usuario.Organizador;
 import modelo.usuario.Preferencia;
-import modelo.usuario.RepositorioUsuarioMemoria;
+// import modelo.usuario.RepositorioUsuarioMemoria; // No más en memoria
+// import modelo.recomendacion.RepositorioEventoMemoria; // No más en memoria
+import modelo.repositorio.*; // Importar todas las interfaces de repositorio
 import modelo.usuario.Usuario;
 import modelo.validacion.ValidarDisponibilidadHandler;
 import modelo.validacion.ValidarLimiteCompraUsuarioHandler;
@@ -50,14 +52,22 @@ public class AplicacionConsola {
 
     private static Scanner scanner = new Scanner(System.in);
 
-    // Controladores
+    // Controladores (ahora actúan más como servicios)
     private static UsuarioController usuarioController;
     private static EventoController eventoController;
     private static CompraController compraController;
 
-    // Repositorios y Servicios
-    private static RepositorioUsuarioMemoria repoUsuario;
-    private static RepositorioEventoMemoria repoEvento;
+    // Repositorios JPA (serán null si no se ejecuta en un contexto Spring con BD configurada)
+    private static UsuarioRepository usuarioRepository;
+    private static EventoRepository eventoRepository;
+    private static LugarRepository lugarRepository;
+    private static CompraRepository compraRepository;
+    private static TipoEntradaRepository tipoEntradaRepository;
+    // private static ImagenRepository imagenRepository; // Si se decide usar
+    // private static VideoRepository videoRepository;   // Si se decide usar
+
+
+    // Otros Servicios y Componentes
     private static SistemaNotificaciones sistemaNotificaciones;
     private static MediadorCompras mediador;
     private static ProcesadorReembolso procesadorReembolso;
@@ -98,80 +108,80 @@ public class AplicacionConsola {
     }
 
     private static void inicializarSistema() {
-        System.out.println("Inicializando sistema...");
+        System.out.println("Inicializando sistema (simulación sin contexto Spring)...");
 
-        repoUsuario = new RepositorioUsuarioMemoria();
-        repoEvento = new RepositorioEventoMemoria();
+        // NO SE PUEDEN INSTANCIAR REPOSITORIOS JPA DIRECTAMENTE AQUÍ.
+        // En una aplicación Spring Boot, serían inyectados.
+        // Para que AplicacionConsola funcione (aunque limitadamente),
+        // los inicializamos a null o a implementaciones dummy que no hagan nada.
+        // Esto significa que las operaciones de BD fallarán.
+        usuarioRepository = null; // new DummyUsuarioRepository();
+        eventoRepository = null;   // new DummyEventoRepository();
+        lugarRepository = null;    // new DummyLugarRepository();
+        compraRepository = null;   // new DummyCompraRepository();
+        tipoEntradaRepository = null; // new DummyTipoEntradaRepository();
+
+        // IRepositorioEvento para GestorRecomendacionesStrategy:
+        // Si GestorRecomendacionesStrategy necesita datos de eventos, y eventoRepository es null,
+        // las recomendaciones no funcionarán. Podríamos usar una implementación en memoria
+        // solo para esta parte si las recomendaciones son cruciales para la demo en consola.
+        // Por ahora, lo pasaremos como null, y las recomendaciones fallarán o devolverán vacío.
+        IRepositorioEvento repoEventoParaRecomendaciones = null;
+        // Alternativa: IRepositorioEvento repoEventoParaRecomendaciones = new RepositorioEventoMemoria();
+        // pero esto desacopla las recomendaciones de la BD principal.
+
         configuradorStrategys = new ConfiguradorStrategys();
         IEstrategiaRecomendacion estrategiaInicialRec = new RecomendacionPorPopularidad();
-        gestorRecomendacionesGlobal = new GestorRecomendacionesStrategy(repoEvento, estrategiaInicialRec, configuradorStrategys);
+        gestorRecomendacionesGlobal = new GestorRecomendacionesStrategy(repoEventoParaRecomendaciones, estrategiaInicialRec, configuradorStrategys);
+
         sistemaNotificaciones = SistemaNotificaciones.getInstance();
         mediador = new MediadorConcreto(sistemaNotificaciones, gestorRecomendacionesGlobal);
-        ProcesadorPago procesadorPago = new ProcesadorPago();
-        GeneradorEntradas generadorEntradas = new GeneradorEntradas();
+
+        ProcesadorPago procesadorPago = new ProcesadorPago(); // Sigue siendo simulado
+        GeneradorEntradas generadorEntradas = new GeneradorEntradas(); // Sigue siendo simulado
+
         ValidarDisponibilidadHandler valDisp = new ValidarDisponibilidadHandler();
         ValidarLimiteCompraUsuarioHandler valLimite = new ValidarLimiteCompraUsuarioHandler();
         valDisp.setNextHandler(valLimite);
         ValidacionHandler cabezaCadenaValidacion = valDisp;
-        procesoCompraFacade = new ProcesoCompraFacade(procesadorPago, generadorEntradas, cabezaCadenaValidacion, mediador);
+
+        // Instanciación de Facade/Controladores con repositorios (posiblemente nulos)
+        procesoCompraFacade = new ProcesoCompraFacade(
+            procesadorPago, generadorEntradas, cabezaCadenaValidacion, mediador,
+            compraRepository, eventoRepository, usuarioRepository, tipoEntradaRepository
+        );
         if (mediador instanceof MediadorConcreto) {
             ((MediadorConcreto) mediador).registrarProcesoCompraFacade(procesoCompraFacade);
         }
-        procesadorReembolso = new ProcesadorReembolso(sistemaNotificaciones);
-        usuarioController = new UsuarioController(repoUsuario, repoEvento, configuradorStrategys);
-        eventoController = new EventoController(repoEvento, sistemaNotificaciones);
-        compraController = new CompraController(procesoCompraFacade, procesadorReembolso);
+        procesadorReembolso = new ProcesadorReembolso(sistemaNotificaciones); // Sigue siendo simulado
 
-        cargarDatosDePrueba();
-        System.out.println("Sistema inicializado correctamente.");
+        usuarioController = new UsuarioController(usuarioRepository, repoEventoParaRecomendaciones, configuradorStrategys);
+        eventoController = new EventoController(eventoRepository, usuarioRepository, lugarRepository, sistemaNotificaciones);
+        compraController = new CompraController(procesoCompraFacade, procesadorReembolso, usuarioRepository, compraRepository);
+
+        System.out.println("ADVERTENCIA: Sistema inicializado sin conexión a base de datos real.");
+        System.out.println("Las operaciones que dependen de la persistencia de datos fallarán o no tendrán efecto.");
+
+        // cargarDatosDePrueba(); // Cargar datos de prueba no funcionará sin repositorios funcionales.
+        // System.out.println("Sistema inicializado correctamente (modo simulación de persistencia).");
     }
 
     private static void cargarDatosDePrueba() {
-        System.out.println("Cargando datos de prueba...");
-        try {
-            Organizador org1 = (Organizador) usuarioController.registrarOrganizador("OrgConciertos", "org@example.com", "pass123", "Contacto Org: 123456789");
-            sistemaNotificaciones.registrarObserver(org1);
-
-            Lugar estadioNacional = new Lugar("Estadio Nacional", "Av. Grecia 2001, Ñuñoa, Santiago");
-            estadioNacional.addTipoDeEventoAdmitido("Concierto");
-            estadioNacional.addTipoDeEventoAdmitido("Deportivo");
-
-            TipoEntradaFactory generalFactory = new EntradaGeneralFactory();
-            TipoEntradaFactory vipFactory = new EntradaVIPFactory();
-            TipoEntrada tipoGeneralConcierto = generalFactory.crearTipoEntrada("General Rock", "Acceso general", 30.00, 500, 5);
-            TipoEntrada tipoVIPConcierto = ((EntradaVIPFactory)vipFactory).crearEntradaVIPConBeneficios("VIP Oro", "Acceso VIP", 100.00, 50, 2, List.of("Acceso preferencial"));
-
-            // Crear lista de Imagen
-            List<modelo.evento.Imagen> imagenesEv1 = new ArrayList<>();
-            imagenesEv1.add(new modelo.evento.Imagen("http://example.com/img1.jpg", "Poster del concierto"));
-
-            // Crear lista de Video (vacía por ahora para simplificar datos de prueba)
-            List<modelo.evento.Video> videosEv1 = new ArrayList<>();
-            // videosEv1.add(new modelo.evento.Video("http://example.com/vid1.mp4", "Trailer del concierto"));
-
-
-            List<TipoEntrada> tiposEv1 = List.of(tipoGeneralConcierto, tipoVIPConcierto);
-            SimpleDateFormat sdf = new SimpleDateFormat("dd/MM/yyyy");
-            Date fechaEv1 = sdf.parse("31/12/2024");
-
-            Evento ev1 = eventoController.crearEvento(org1, "EVT001", "Concierto Fin de Año", "Gran concierto", "Concierto", fechaEv1, "20:00", estadioNacional, 550, imagenesEv1, videosEv1, tiposEv1);
-            eventoController.publicarEvento(ev1.getId(), org1);
-
-            Asistente asist1 = (Asistente) usuarioController.registrarAsistente("Ana Cuenta", "ana@example.com", "pass456");
-            asist1.addPreferencia(new Preferencia("Concierto", "Santiago"));
-            sistemaNotificaciones.registrarObserver(asist1);
-
-            Asistente asist2 = (Asistente) usuarioController.registrarAsistente("Juan Rocker", "juan@example.com", "pass789");
-            asist2.addPreferencia(new Preferencia("Concierto", "Santiago"));
-            sistemaNotificaciones.registrarObserver(asist2);
-
-            System.out.println("Datos de prueba cargados.");
-
-        } catch (AplicacionException e) {
-            System.err.println("Error al cargar datos de prueba: " + e.getMessage());
-        } catch (ParseException e) {
-            System.err.println("Error de formato de fecha en datos de prueba: " + e.getMessage());
+        // Esta función no podrá funcionar correctamente si los repositorios son null
+        // o si son implementaciones dummy que no persisten.
+        // Para probar con datos, se necesitaría una BD H2 en memoria configurada
+        // o ejecutar esto como parte de una @SpringBootTest.
+        System.out.println("Cargando datos de prueba (omitido en modo simulación de persistencia)...");
+        if (usuarioRepository == null || eventoRepository == null) {
+            System.out.println("No se pueden cargar datos de prueba sin repositorios funcionales.");
+            return;
         }
+        // El resto del código de cargarDatosDePrueba necesitaría adaptarse para usar IDs Long
+        // y para llamar a los métodos de los controladores que ahora esperan IDs.
+        // Por ejemplo:
+        // Organizador org1 = (Organizador) usuarioController.registrarOrganizador("OrgConciertos", "org@example.com", "pass123", "Contacto Org: 123456789");
+        // Evento ev1 = eventoController.crearEvento(org1.getId(), "EVT001" (este ID ya no se pasa), ...);
+        // Esto es solo un ejemplo, la adaptación sería más profunda.
     }
 
 
