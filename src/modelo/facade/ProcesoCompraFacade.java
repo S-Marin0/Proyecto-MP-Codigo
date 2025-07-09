@@ -4,14 +4,15 @@ package modelo.facade;
 import modelo.usuario.Usuario;
 import modelo.evento.Evento;
 import modelo.entrada.TipoEntrada;
-import modelo.entrada.Entrada; // Para la lista de entradas en Compra
-import modelo.entrada.EntradaBase; // Para crear instancias base de Entrada
+import modelo.entrada.Entrada;
+import modelo.entrada.EntradaBase;
 import modelo.compra.Compra;
 import modelo.compra.MetodoPago;
 import modelo.compra.EstadoCompra;
 import modelo.validacion.ValidacionHandler;
-import modelo.validacion.ValidacionContext; // Importar ValidacionContext
-import modelo.notificacion.SistemaNotificaciones; // Import completo
+import modelo.validacion.ValidacionContext;
+import modelo.notificacion.SistemaNotificaciones;
+import modelo.mediador.MediadorCompras; // Importar el Mediador
 
 import java.util.List;
 import java.util.ArrayList;
@@ -19,100 +20,80 @@ import java.util.ArrayList;
 public class ProcesoCompraFacade {
     private final ProcesadorPago procesadorPago;
     private final GeneradorEntradas generadorEntradas;
-    private final SistemaNotificaciones sistemaNotificaciones;
-    private final ValidacionHandler cadenaValidacionGlobal; // El inicio de la cadena de validaciones
+    // private final SistemaNotificaciones sistemaNotificaciones; // Ahora manejado por el Mediador
+    private final ValidacionHandler cadenaValidacionGlobal;
+    private final MediadorCompras mediador; // Referencia al Mediador
 
     public ProcesoCompraFacade(ProcesadorPago procesadorPago,
                                GeneradorEntradas generadorEntradas,
-                               SistemaNotificaciones sistemaNotificaciones,
-                               ValidacionHandler cadenaValidacionGlobal) {
+                               // SistemaNotificaciones sistemaNotificaciones, // Ya no se inyecta directamente
+                               ValidacionHandler cadenaValidacionGlobal,
+                               MediadorCompras mediador) {
         if (procesadorPago == null) throw new IllegalArgumentException("ProcesadorPago no puede ser nulo.");
         if (generadorEntradas == null) throw new IllegalArgumentException("GeneradorEntradas no puede ser nulo.");
-        if (sistemaNotificaciones == null) throw new IllegalArgumentException("SistemaNotificaciones no puede ser nulo.");
+        // if (sistemaNotificaciones == null) throw new IllegalArgumentException("SistemaNotificaciones no puede ser nulo.");
         if (cadenaValidacionGlobal == null) throw new IllegalArgumentException("CadenaValidacionGlobal no puede ser nula.");
+        if (mediador == null) throw new IllegalArgumentException("MediadorCompras no puede ser nulo.");
 
         this.procesadorPago = procesadorPago;
         this.generadorEntradas = generadorEntradas;
-        this.sistemaNotificaciones = sistemaNotificaciones;
+        // this.sistemaNotificaciones = sistemaNotificaciones;
         this.cadenaValidacionGlobal = cadenaValidacionGlobal;
+        this.mediador = mediador;
     }
 
-    // Método principal que orquesta todo el proceso de compra
     public Compra ejecutarProcesoCompra(Usuario usuario, Evento evento, TipoEntrada tipoEntrada, int cantidad, MetodoPago metodoPago, String codigoDescuento) {
 
-        // 1. Validación inicial usando la cadena de responsabilidad
         ValidacionContext contextoValidacion = new ValidacionContext(usuario, evento, tipoEntrada, cantidad);
         if (!cadenaValidacionGlobal.procesarValidacion(contextoValidacion)) {
-            System.err.println("Error de validación: " + cadenaValidacionGlobal.getMensajeError());
-            // Podríamos querer obtener el mensaje del handler específico que falló si la cadena se estructura así.
-            // Actualmente getMensajeError() en ValidacionHandler base obtendría el último error.
-            return null; // La compra no puede proceder
+            System.err.println("ProcesoCompraFacade: Error de validación - " + cadenaValidacionGlobal.getMensajeError());
+            return null;
         }
 
-        // 2. Crear instancias de Entrada (base, aún no decoradas si aplica descuento aquí)
-        // El precio total se calculará basado en estas entradas.
-        // En un sistema real, la creación de 'Entrada' podría ser más compleja,
-        // especialmente si cada entrada necesita un ID único, código QR, etc.
         List<Entrada> entradasParaComprar = new ArrayList<>();
         double precioUnitario = tipoEntrada.getPrecio();
         for (int i = 0; i < cantidad; i++) {
-            // Creamos una EntradaBase. Los decorators (descuentos) se aplicarían después si es necesario,
-            // o el precio ya está ajustado en el tipoEntrada si el descuento es a nivel de tipo.
             entradasParaComprar.add(new EntradaBase(tipoEntrada, evento));
         }
         double totalCalculado = precioUnitario * cantidad;
 
-        // (Opcional) Aplicar código de descuento aquí si afecta el precio total
-        // Esto podría modificar totalCalculado o requerir que las 'entradasParaComprar' sean decoradas
         if (codigoDescuento != null && !codigoDescuento.isEmpty()) {
             totalCalculado = aplicarDescuento(totalCalculado, codigoDescuento);
-            // Si el descuento es por entrada, habría que decorar cada entrada en entradasParaComprar
-            // y recalcular el total sumando los precios de las entradas decoradas.
-            // Por simplicidad, aplicamos un descuento al total general.
         }
 
-        // 3. Iniciar el objeto Compra (aún en estado PENDIENTE)
         Compra nuevaCompra = new Compra(usuario, evento, tipoEntrada, cantidad, entradasParaComprar, totalCalculado, metodoPago);
-        System.out.println("Compra iniciada ID: " + nuevaCompra.getId() + " por " + totalCalculado);
+        System.out.println("ProcesoCompraFacade: Compra iniciada ID: " + nuevaCompra.getId() + " por " + totalCalculado);
 
-        // 4. Procesar el pago
-        if (!procesadorPago.procesar(metodoPago, nuevaCompra.getTotalPagado())) { // ProcesadorPago necesita el monto
-            System.err.println("Error en el procesamiento del pago para la compra ID: " + nuevaCompra.getId());
-            nuevaCompra.setEstado(EstadoCompra.CANCELADA); // O un estado específico de fallo de pago
-            // Aquí se podría notificar al usuario sobre el fallo del pago.
-            return nuevaCompra; // Devolver la compra en estado fallido
-        }
-        nuevaCompra.setEstado(EstadoCompra.CONFIRMADA);
-        System.out.println("Pago procesado y compra confirmada ID: " + nuevaCompra.getId());
-
-        // 5. Generar las entradas (actualizar disponibilidad, etc.)
-        // Esto significa que el TipoEntrada debe reducir su disponibilidad.
-        if (!tipoEntrada.reducirDisponibilidad(cantidad)) {
-            // Esto sería un error grave si la validación de disponibilidad pasó pero aquí falla.
-            // Podría indicar un problema de concurrencia. Se necesitaría una lógica de rollback del pago.
-            System.err.println("Error CRÍTICO: No se pudo reducir la disponibilidad de entradas después del pago para compra ID: " + nuevaCompra.getId());
-            nuevaCompra.setEstado(EstadoCompra.CANCELADA); // O un estado de error específico
-            // Intentar revertir el pago (lógica de compensación)
-            // procesadorPago.revertirPago(...);
+        if (!procesadorPago.procesar(metodoPago, nuevaCompra.getTotalPagado())) {
+            System.err.println("ProcesoCompraFacade: Error en el procesamiento del pago para la compra ID: " + nuevaCompra.getId());
+            nuevaCompra.setEstado(EstadoCompra.CANCELADA);
+            // Notificar al mediador sobre el fallo de pago si es necesario coordinar algo más.
+            // mediador.notificarFalloPago(usuario, nuevaCompra);
             return nuevaCompra;
         }
-        generadorEntradas.generar(evento, tipoEntrada, cantidad, nuevaCompra); // Generador podría necesitar la Compra para asociar entradas
-        System.out.println("Entradas generadas para compra ID: " + nuevaCompra.getId());
+        nuevaCompra.setEstado(EstadoCompra.CONFIRMADA);
+        System.out.println("ProcesoCompraFacade: Pago procesado y compra confirmada ID: " + nuevaCompra.getId());
 
+        if (!tipoEntrada.reducirDisponibilidad(cantidad)) {
+            System.err.println("ProcesoCompraFacade: Error CRÍTICO - No se pudo reducir la disponibilidad de entradas después del pago para compra ID: " + nuevaCompra.getId());
+            nuevaCompra.setEstado(EstadoCompra.CANCELADA);
+            // Lógica de compensación: revertir el pago.
+            // procesadorPago.revertirPago(nuevaCompra.getIdTransaccionPago(), nuevaCompra.getTotalPagado()); // Asumiendo que Compra tiene ID de trans.
+            return nuevaCompra;
+        }
+        generadorEntradas.generar(evento, tipoEntrada, cantidad, nuevaCompra);
+        System.out.println("ProcesoCompraFacade: Entradas generadas para compra ID: " + nuevaCompra.getId());
 
-        // 6. Añadir la compra al historial del usuario
-        usuario.addCompraAlHistorial(nuevaCompra);
+        // En lugar de añadir al historial y notificar directamente, notificamos al Mediador.
+        mediador.notificarCompraExitosa(usuario, nuevaCompra);
 
-        // 7. Notificar al usuario
-        sistemaNotificaciones.enviarConfirmacionCompra(usuario, nuevaCompra);
-
-        // 8. (Opcional) Generar comprobante
+        // La generación del comprobante podría seguir siendo responsabilidad del facade o del mediador.
+        // Por ahora, la dejamos aquí, pero el mediador también podría llamarla.
         nuevaCompra.generarComprobante();
 
         return nuevaCompra;
     }
 
-    // Método placeholder para aplicar descuento
     private double aplicarDescuento(double totalActual, String codigo) {
         // Lógica para validar el código y aplicar el descuento.
         // Por ejemplo, un 10% de descuento.

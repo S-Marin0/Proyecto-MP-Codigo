@@ -7,8 +7,8 @@ import java.util.ArrayList;
 import modelo.lugar.Lugar;
 import modelo.usuario.Organizador;
 import modelo.entrada.TipoEntrada;
-// Asumiendo que EstadoEventos es una interfaz o clase abstracta en este paquete o importada
-// import modelo.estado.EstadoEventos;
+import modelo.state.EstadoEventos; // Importar desde el paquete state
+import modelo.state.EstadoEventoBorrador; // Importar el estado inicial concreto
 
 public class Evento {
     private String id;
@@ -25,7 +25,7 @@ public class Evento {
     private List<TipoEntrada> tiposEntrada;
     // private double precio; // El precio suele estar asociado al TipoEntrada, no directamente al evento general
     private int entradasVendidas;
-    private EstadoEventos estadoActual; // Asumiendo la existencia de esta clase/interfaz para el patrón State
+    private EstadoEventos estadoActual;
 
     // Constructor package-private para ser usado por EventoBuilder
     Evento() {
@@ -33,7 +33,7 @@ public class Evento {
         this.videosPromocionales = new ArrayList<>();
         this.tiposEntrada = new ArrayList<>();
         this.entradasVendidas = 0;
-        // this.estadoActual = new EstadoEventoBorrador(); // Estado inicial por defecto, por ejemplo
+        this.estadoActual = new EstadoEventoBorrador(); // Estado inicial por defecto
     }
 
     // Getters

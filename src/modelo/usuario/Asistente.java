@@ -6,22 +6,23 @@ import java.util.List;
 import java.util.Objects;
 
 import modelo.compra.Compra;
-import modelo.compra.MetodoPago; // Necesario para solicitarCompra
+import modelo.compra.MetodoPago;
 import modelo.comando.Command;
 import modelo.comando.ComprarEntradasCommand;
 import modelo.comando.CommandInvoker;
 import modelo.evento.Evento;
 import modelo.entrada.TipoEntrada;
-import modelo.facade.ProcesoCompraFacade; // Necesario para el comando de compra
-import modelo.recomendacion.GestorRecomendacionesStrategy; // Para obtener recomendaciones
+import modelo.facade.ProcesoCompraFacade;
+import modelo.recomendacion.GestorRecomendacionesStrategy;
+import modelo.reembolso.ProcesadorReembolso; // Para cancelar/reembolsar compra
 
 public class Asistente extends Usuario {
     private CommandInvoker commandInvoker;
-    private GestorRecomendacionesStrategy gestorRecomendaciones; // El asistente tendrá su gestor
+    private GestorRecomendacionesStrategy gestorRecomendaciones;
 
     public Asistente(String id, String nombre, String email, String password, GestorRecomendacionesStrategy gestorRecomendaciones) {
         super(id, nombre, email, password);
-        this.commandInvoker = new CommandInvoker(); // Podría ser inyectado también
+        this.commandInvoker = new CommandInvoker();
         if (gestorRecomendaciones == null) {
             throw new IllegalArgumentException("El GestorRecomendacionesStrategy no puede ser nulo para un Asistente.");
         }
@@ -49,46 +50,37 @@ public class Asistente extends Usuario {
 
     @Override
     public List<Evento> obtenerRecomendaciones() {
-        // El gestor ya debería tener configurada la estrategia adecuada para este usuario
-        // (o se podría llamar a gestorRecomendaciones.establecerEstrategiaParaUsuario(this) aquí mismo
-        // si el gestor es compartido y necesita reconfigurarse).
         if (this.gestorRecomendaciones == null) {
             System.err.println(this.nombre + ": Gestor de recomendaciones no disponible.");
             return new ArrayList<>();
         }
-        // Aseguramos que el gestor use la estrategia adecuada para este usuario
         this.gestorRecomendaciones.establecerEstrategiaParaUsuario(this);
         return this.gestorRecomendaciones.generarRecomendaciones(this);
     }
 
-    // La firma de solicitarCompra ya está en Usuario.
-    // Aquí la implementamos. Necesita el ProcesoCompraFacade.
-    // Esto implica que el Asistente necesita acceso al Facade, o el Comando lo obtiene.
-    // Por ahora, el Comando lo tomará en su constructor.
+    // Implementación del método abstracto de Usuario (firma básica)
     @Override
-    public void solicitarCompra(Evento evento, TipoEntrada tipoEntrada, int cantidad, MetodoPago metodoPago, ProcesoCompraFacade facade) {
+    public void solicitarCompra(Evento evento, TipoEntrada tipoEntrada, int cantidad) {
+         // Esta versión es llamada si no se proveen MetodoPago y Facade.
+         // Podría tener una lógica por defecto o lanzar una excepción.
+         System.err.println("Asistente.solicitarCompra: Se requiere MetodoPago y ProcesoCompraFacade para una compra completa. Esta es una solicitud básica.");
+         throw new UnsupportedOperationException("Para completar la compra, por favor provea MetodoPago y ProcesoCompraFacade. Utilice la firma completa de solicitarCompra en Asistente.");
+    }
+
+    // Método sobrecargado específico de Asistente con todos los parámetros necesarios.
+    public void solicitarCompra(Evento evento, TipoEntrada tipoEntrada, int cantidad, MetodoPago metodoPago, ProcesoCompraFacade facade, String codigoDescuento) {
         if (evento == null || tipoEntrada == null || cantidad <= 0 || metodoPago == null || facade == null) {
-            System.err.println("Error en Asistente.solicitarCompra: Datos de compra o facade inválidos.");
+            System.err.println("Error en Asistente.solicitarCompra (completa): Datos de compra o facade inválidos.");
             return;
         }
         System.out.println(this.nombre + " está solicitando comprar " + cantidad + " entradas de tipo '" +
                            tipoEntrada.getNombre() + "' para el evento '" + evento.getNombre() + "'.");
 
-        Command comprarCommand = new ComprarEntradasCommand(this, evento, tipoEntrada, cantidad, metodoPago, facade);
-        // Se podría añadir un código de descuento si el usuario tiene uno
-        // if (this.codigoDescuentoActivo != null) {
-        //    ((ComprarEntradasCommand) comprarCommand).setCodigoDescuento(this.codigoDescuentoActivo);
-        // }
+        ComprarEntradasCommand comprarCommand = new ComprarEntradasCommand(this, evento, tipoEntrada, cantidad, metodoPago, facade);
+        if (codigoDescuento != null && !codigoDescuento.isEmpty()) {
+           comprarCommand.setCodigoDescuento(codigoDescuento);
+        }
         this.commandInvoker.executeCommand(comprarCommand);
-    }
-
-    // Sobrecarga del método abstracto de Usuario para no romper la firma,
-    // pero idealmente se llamaría con todos los parámetros.
-    @Override
-    public void solicitarCompra(Evento evento, TipoEntrada tipoEntrada, int cantidad) {
-         System.err.println("Método solicitarCompra invocado sin MetodoPago y ProcesoCompraFacade. Por favor, use la versión completa.");
-         // Podríamos lanzar una excepción o no hacer nada.
-         // throw new UnsupportedOperationException("Se requiere MetodoPago y ProcesoCompraFacade para solicitarCompra.");
     }
 
 
